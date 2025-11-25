@@ -56,34 +56,44 @@
 				Select-String -Pattern BinaryUrl *.mkape | Where-Object { !( $_ | Select-String -Pattern "(.zip)|(.exe)|(.ps1)" -quiet) }
 	2019-09-12	Updated to support sub-directory structure of KAPE modules as of 0.8.7.0
 				Get-ChildItem -Recurse *.mkape | Select-String -Pattern BinaryUrl | Where-Object { !( $_ | Select-String -Pattern "(.zip)|(.exe)|(.ps1)" -quiet) }
+	2025-11-25  Addding logic to check for existence of destination file to avoid unnecessary downloads 
 #>
 
 
 $currentDirectory = (Resolve-Path ".")
-$destinationDir = [string]$currentDirectory+"\bin\"
+$destinationDir = [string]$currentDirectory + "\bin\"
 
 Get-ChildItem -Path $currentDirectory -Recurse -Filter *.mkape | Get-Content | ForEach-Object {
-	$items = $_.split()
-	if ($items[0] -eq "BinaryUrl:"){
-		$URL = [string]$items[1]
-		$filename = Split-Path $URL -Leaf
-		$start = $filename.lastIndexOf('.')+1
-		$len = $filename.length
-		$extension = $filename.Substring($start,$len-$start)
-		
-		Echo $URL
-		
-		if ($extension -eq "exe"){(New-Object System.Net.WebClient).DownloadFile($url,"$destinationDir$filename")}
-		if ($extension -eq "ps1"){(New-Object System.Net.WebClient).DownloadFile($url,"$destinationDir$filename")}
-		if ($extension -eq "zip"){
-			(New-Object System.Net.WebClient).DownloadFile($url,"$destinationDir$filename")
-			Expand-Archive -Path $destinationDir$filename -DestinationPath $destinationDir -Force
-			Remove-Item -Path $destinationDir$filename
-		}
-	}
+    $items = $_.split()
+    if ($items[0] -eq "BinaryUrl:") {
+        $URL = [string]$items[1]
+        $filename = Split-Path $URL -Leaf
+        $start = $filename.lastIndexOf('.') + 1
+        $len = $filename.length
+        $extension = $filename.Substring($start, $len - $start)
+
+        Echo $URL
+
+        $destinationFile = Join-Path $destinationDir $filename
+
+        # Check if the file already exists to avoid unnecessary downloads
+        if (-Not (Test-Path -Path $destinationFile)) {
+            if ($extension -eq "exe" -or $extension -eq "ps1") {
+                (New-Object System.Net.WebClient).DownloadFile($URL, $destinationFile)
+            }
+            elseif ($extension -eq "zip") {
+                (New-Object System.Net.WebClient).DownloadFile($URL, $destinationFile)
+                Expand-Archive -Path $destinationFile -DestinationPath $destinationDir -Force
+                Remove-Item -Path $destinationFile
+            }
+        }
+        else {
+            Write-Host "File '$filename' already exists in the destination folder. Skipping download."
+        }
+    }
 }
 
-# densityscout, RECmd, SBECmd, sqlite3
+# Copy specific binaries to the bin directory
 Copy-Item -Path $destinationDir"win64\densityscout.exe" -Destination $destinationDir -Force
 Copy-Item -Path $destinationDir"EvtxExplorer\EvtxECmd.exe" -Destination $destinationDir -Force
 Copy-Item -Path $destinationDir"RegistryExplorer\RECmd.exe" -Destination $destinationDir -Force

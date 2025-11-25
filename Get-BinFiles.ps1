@@ -1,101 +1,96 @@
 <#
-	.SYNOPSIS
-	This script downloads third party binaries required for KAPE modules and places them in the bin directory.
+.SYNOPSIS
+    Download third-party binaries referenced in KAPE modules into the bin directory.
 
-	.DESCRIPTION
-	This script downloads EXE, PS1, and ZIP files identified in the BinaryUrl field of KAPE modules
-	and extracts archives to the bin directory.
-	
-	To use, place this script in the KAPE\modules directory.
-	
-	The following modules do not contain a BinaryUrl field that points directly to a downloadable
-	script, exe, or zip file.  Binaries for these modules will need to be downloaded manually.
-	
-	BrowsingHistory\Hindsight.mkape:6:BinaryUrl: https://github.com/obsidianforensics/hindsight/releases
-	EventLogs\ApplicationFullEventLogView.mkape:6:BinaryUrl: https://www.nirsoft.net/utils/full_event_log_view.html
-	EventLogs\Detailed-Network-Share-Access.mkape:6:BinaryUrl: https://www.microsoft.com/en-us/download/confirmation.aspx?id=24659
-	EventLogs\Logon-Logoff-events.mkape:6:BinaryUrl: https://www.microsoft.com/en-us/download/confirmation.aspx?id=24659
-	EventLogs\PowershellOperationalFullEventLogView.mkape:6:BinaryUrl: https://www.nirsoft.net/utils/full_event_log_view.html
-	EventLogs\PrintServiceOperationalFullEventLogView.mkape:6:BinaryUrl: https://www.nirsoft.net/utils/full_event_log_view.html
-	EventLogs\RDP-Usage-events.mkape:6:BinaryUrl: https://www.microsoft.com/en-us/download/confirmation.aspx?id=24659
-	EventLogs\ScheduledTasksFullEventLogView.mkape:6:BinaryUrl: https://www.nirsoft.net/utils/full_event_log_view.html
-	EventLogs\SecurityFullEventLogView.mkape:6:BinaryUrl: https://www.nirsoft.net/utils/full_event_log_view.html
-	EventLogs\SMB-Server-Anonymous-Logon.mkape:6:BinaryUrl: https://www.microsoft.com/en-us/download/confirmation.aspx?id=24659
-	EventLogs\SystemFullEventLogView.mkape:6:BinaryUrl: https://www.nirsoft.net/utils/full_event_log_view.html
-	LiveResponse\DumpIt.mkape:6:BinaryUrl: https://my.comae.io
-	LiveResponse\Hashes.mkape:6:BinaryUrl: https://github.com/gentilkiwi/mimikatz/releases
-	Misc\Apache_Access_Log.mkape:6:BinaryUrl: https://www.microsoft.com/en-us/download/confirmation.aspx?id=24659
-	Misc\iTunesBackup.mkape:6:BinaryUrl: https://github.com/jfarley248/iTunes_Backup_Analyzer/releases
-	Misc\SEPM_Logs.mkape:6:BinaryUrl: https://github.com/Beercow/SEPparser/releases
-	Misc\SparkCore.mkape:6:BinaryUrl: https://www.nextron-systems.com/spark-core/
-	Misc\TaskScheduler.mkape:6:BinaryUrl: https://tzworks.net/download_links.php
-	Registry\Registry_System.mkape:6:BinaryUrl: https://tzworks.net/download_links.php
-	Registry\RegRipper-ALL.mkape:6:BinaryUrl: https://github.com/keydet89/RegRipper2.8
-	Registry\RegRipper-ntuser.mkape:6:BinaryUrl: https://github.com/keydet89/RegRipper2.8
-	Registry\RegRipper-sam.mkape:6:BinaryUrl: https://github.com/keydet89/RegRipper2.8
-	Registry\RegRipper-security.mkape:6:BinaryUrl: https://github.com/keydet89/RegRipper2.8
-	Registry\RegRipper-software.mkape:6:BinaryUrl: https://github.com/keydet89/RegRipper2.8
-	Registry\RegRipper-system.mkape:6:BinaryUrl: https://github.com/keydet89/RegRipper2.8
-	Timelining\Convert_unicode.mkape:6:BinaryUrl: https://github.com/mdegrazia/KAPE_Tools
-	Timelining\EvtxECmd_to_TLN.mkape:6:BinaryUrl: https://github.com/mdegrazia/KAPE_Tools
-	Timelining\RegRipper_AppCompatCache_TLN.mkape:6:BinaryUrl: https://github.com/keydet89/RegRipper2.8
-	Timelining\RegRipper_NTUSER_muicache_TLN.mkape:6:BinaryUrl: https://github.com/keydet89/RegRipper2.8
-	Timelining\RegRipper_NTUSER_userassit_TLN.mkape:6:BinaryUrl: https://github.com/keydet89/RegRipper2.8
-	Timelining\RegRipper_Services_TLN.mkape:6:BinaryUrl: https://github.com/keydet89/RegRipper2.8
+.DESCRIPTION
+    This script searches KAPE module files (*.mkape) for lines beginning with "BinaryUrl:"
+    and downloads EXE, PS1, and ZIP files referenced there. ZIPs are extracted into the bin
+    directory and the archive is removed.
 
-	.EXAMPLE
-	C:\PS> Get-BinFiles.ps1 
-	
-	.NOTES
-	Author: eSecRPM
-	Date:   2019-03-21
-	
-	ChangeLog
-	2019-06-26  Removed 7zip dependency and added logic for PowerShell scripts
-	2019-06-27	Moved list of modules without executable download links to description
-				Select-String -Pattern BinaryUrl *.mkape | Where-Object { !( $_ | Select-String -Pattern "(.zip)|(.exe)|(.ps1)" -quiet) }
-	2019-09-12	Updated to support sub-directory structure of KAPE modules as of 0.8.7.0
-				Get-ChildItem -Recurse *.mkape | Select-String -Pattern BinaryUrl | Where-Object { !( $_ | Select-String -Pattern "(.zip)|(.exe)|(.ps1)" -quiet) }
-	2025-11-25  Addding logic to check for existence of destination file to avoid unnecessary downloads 
+    The script will skip downloading any file that already exists in the destination bin folder.
+
+.NOTES
+    Author: eSecRPM (adapted)
+    Modified: English comments + existence checks + error handling
 #>
 
+# Determine current directory and destination bin directory
+$currentDirectory = (Resolve-Path ".").ProviderPath
+$destinationDir = Join-Path $currentDirectory "bin"
 
-$currentDirectory = (Resolve-Path ".")
-$destinationDir = [string]$currentDirectory + "\bin\"
+# Ensure destination directory exists
+if (-not (Test-Path -Path $destinationDir)) {
+    New-Item -Path $destinationDir -ItemType Directory -Force | Out-Null
+}
 
-Get-ChildItem -Path $currentDirectory -Recurse -Filter *.mkape | Get-Content | ForEach-Object {
-    $items = $_.split()
-    if ($items[0] -eq "BinaryUrl:") {
-        $URL = [string]$items[1]
-        $filename = Split-Path $URL -Leaf
-        $start = $filename.lastIndexOf('.') + 1
-        $len = $filename.length
-        $extension = $filename.Substring($start, $len - $start)
+# Iterate all *.mkape files recursively and search for BinaryUrl lines
+Get-ChildItem -Path $currentDirectory -Recurse -Filter *.mkape | ForEach-Object {
+    $mkapeFile = $_.FullName
 
-        Echo $URL
+    Get-Content -Path $mkapeFile | ForEach-Object {
+        $line = $_.Trim()
 
-        $destinationFile = Join-Path $destinationDir $filename
+        # Match lines like: BinaryUrl: https://example.com/file.zip
+        if ($line -match '^BinaryUrl:\s*(\S+)') {
+            $URL = $Matches[1]
+            $filename = Split-Path $URL -Leaf
+            $extension = [IO.Path]::GetExtension($filename).TrimStart('.').ToLower()
 
-        # Check if the file already exists to avoid unnecessary downloads
-        if (-Not (Test-Path -Path $destinationFile)) {
-            if ($extension -eq "exe" -or $extension -eq "ps1") {
-                (New-Object System.Net.WebClient).DownloadFile($URL, $destinationFile)
+            Write-Host "Found URL: $URL"
+
+            $destinationFile = Join-Path $destinationDir $filename
+
+            # Skip download if the file already exists
+            if (Test-Path -Path $destinationFile) {
+                Write-Host "File '$filename' already exists in the destination folder. Skipping download."
+                return
             }
-            elseif ($extension -eq "zip") {
-                (New-Object System.Net.WebClient).DownloadFile($URL, $destinationFile)
-                Expand-Archive -Path $destinationFile -DestinationPath $destinationDir -Force
-                Remove-Item -Path $destinationFile
+
+            try {
+                Write-Host "Downloading $filename ..."
+                $wc = New-Object System.Net.WebClient
+                $wc.DownloadFile($URL, $destinationFile)
+                Write-Host "Downloaded: $destinationFile"
+
+                # If ZIP, extract and remove the zip file
+                if ($extension -eq 'zip') {
+                    Write-Host "Extracting $filename ..."
+                    Expand-Archive -Path $destinationFile -DestinationPath $destinationDir -Force
+                    Remove-Item -Path $destinationFile -Force
+                    Write-Host "Extracted and removed $filename"
+                }
             }
-        }
-        else {
-            Write-Host "File '$filename' already exists in the destination folder. Skipping download."
+            catch {
+                Write-Warning "Failed to download or extract '$URL'. Error: $_"
+                # Clean up any partially downloaded file
+                if (Test-Path -Path $destinationFile) {
+                    Remove-Item -Path $destinationFile -Force -ErrorAction SilentlyContinue
+                }
+            }
         }
     }
 }
 
-# Copy specific binaries to the bin directory
-Copy-Item -Path $destinationDir"win64\densityscout.exe" -Destination $destinationDir -Force
-Copy-Item -Path $destinationDir"EvtxExplorer\EvtxECmd.exe" -Destination $destinationDir -Force
-Copy-Item -Path $destinationDir"RegistryExplorer\RECmd.exe" -Destination $destinationDir -Force
-Copy-Item -Path $destinationDir"ShellBagsExplorer\SBECmd.exe" -Destination $destinationDir -Force
-Copy-Item -Path $destinationDir"sqlite-tools-win32-x86-3270200\sqlite3.exe" -Destination $destinationDir -Force
+# Copy specific binaries from subfolders into the bin root if they exist
+$copyMappings = @(
+    @{ Source = Join-Path $destinationDir "win64\densityscout.exe"; Destination = $destinationDir },
+    @{ Source = Join-Path $destinationDir "EvtxExplorer\EvtxECmd.exe"; Destination = $destinationDir },
+    @{ Source = Join-Path $destinationDir "RegistryExplorer\RECmd.exe"; Destination = $destinationDir },
+    @{ Source = Join-Path $destinationDir "ShellBagsExplorer\SBECmd.exe"; Destination = $destinationDir },
+    @{ Source = Join-Path $destinationDir "sqlite-tools-win32-x86-3270200\sqlite3.exe"; Destination = $destinationDir }
+)
+
+foreach ($map in $copyMappings) {
+    if (Test-Path -Path $map.Source) {
+        try {
+            Copy-Item -Path $map.Source -Destination $map.Destination -Force
+            Write-Host "Copied $(Split-Path $map.Source -Leaf) to bin root."
+        }
+        catch {
+            Write-Warning "Failed to copy '$($map.Source)'. Error: $_"
+        }
+    }
+    else {
+        Write-Host "Source '$($map.Source)' not found. Skipping."
+    }
+}
